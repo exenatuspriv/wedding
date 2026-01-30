@@ -12,38 +12,43 @@ app.use(express.urlencoded({ extended: true }));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
-// --- FUNKCJA TWORZĄCA AUTH (Bezpieczna) ---
-async function getGoogleAuth() {
+// --- FUNKCJA POMOCNICZA: POBIERZ AUTORYZACJĘ ---
+// Ta funkcja uruchamia się przy KAŻDYM zapytaniu, gwarantując świeże dane.
+function getGoogleAuth() {
+    const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
+
     try {
-        // 1. TRYB VERCEL (Zmienna)
+        // 1. SPRAWDZAMY VERCEL (ZMIENNA)
         if (process.env.GOOGLE_CREDENTIALS) {
             const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
-            // Naprawa klucza - Vercel czasem zamienia \n na tekst
-            const privateKey = credentials.private_key.replace(/\\n/g, '\n');
 
-            console.log('pokaż mi co tutaj mam' + credentials.client_email + '<br/> a tutaj' + privateKey);
+            // NAPRAWA KLUCZA (Vercel Newline Fix)
+            const privateKey = credentials.private_key
+                ? credentials.private_key.replace(/\\n/g, '\n')
+                : undefined;
 
+            if (!privateKey) throw new Error("Brak private_key w zmiennej GOOGLE_CREDENTIALS");
 
-            const auth = new google.auth.JWT(
+            return new google.auth.JWT(
                 credentials.client_email,
                 null,
                 privateKey,
-                ['https://www.googleapis.com/auth/spreadsheets']
+                SCOPES
             );
-            return auth;
         }
-        // 2. TRYB LOKALNY (Plik)
+        // 2. SPRAWDZAMY LOKALNIE (PLIK)
         else {
             const credentialsPath = path.join(__dirname, 'credentials.json');
             if (fs.existsSync(credentialsPath)) {
                 return new google.auth.JWT({
                     keyFile: credentialsPath,
-                    scopes: ['https://www.googleapis.com/auth/spreadsheets']
+                    scopes: SCOPES
                 });
             }
         }
     } catch (error) {
-        console.error("Auth Error:", error.message);
+        console.error("❌ Błąd tworzenia obiektu Auth:", error.message);
+        return null;
     }
     return null;
 }
@@ -52,14 +57,20 @@ async function getGoogleAuth() {
 
 app.get('/:token', async (req, res) => {
     const { token } = req.params;
-    if (token === 'favicon.ico') return res.status(204).end();
+    // Ignoruj requesty o ikonę i mapy źródłowe
+    if (token === 'favicon.ico' || token.endsWith('.map')) return res.status(204).end();
 
     try {
-        const auth = await getGoogleAuth();
-        if (!auth) throw new Error("Błąd konfiguracji kluczy Google (Auth failed)");
+        // 1. POBIERZ AUTH TERAZ (nie globalnie)
+        const auth = getGoogleAuth();
+        if (!auth) {
+            throw new Error("Nie udało się skonfigurować autoryzacji Google (Brak zmiennej lub pliku).");
+        }
 
+        // 2. UTWÓRZ KLIENTA SHEETS Z TYM AUTH
         const sheets = google.sheets({ version: 'v4', auth });
 
+        // 3. WYKONAJ ZAPYTANIE
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: process.env.SHEET_ID,
             range: 'Arkusz1!A:D',
@@ -81,8 +92,13 @@ app.get('/:token', async (req, res) => {
             res.status(404).render('404');
         }
     } catch (error) {
-        console.error("Błąd GET:", error.message);
-        res.status(500).send(`Błąd serwera: ${error.message}`);
+        console.error("🔥 Błąd GET:", error.message);
+        // Wypisz błąd na ekranie, żebyś widział co jest nie tak
+        res.status(500).send(`
+            <h1>Błąd Serwera</h1>
+            <p>${error.message}</p>
+            <p>Sprawdź logi Vercel po szczegóły.</p>
+        `);
     }
 });
 
@@ -91,8 +107,8 @@ app.post('/confirm/:token', async (req, res) => {
     const { status, comment } = req.body;
 
     try {
-        const auth = await getGoogleAuth();
-        if (!auth) throw new Error("Błąd konfiguracji kluczy Google (Auth failed)");
+        const auth = getGoogleAuth();
+        if (!auth) throw new Error("Błąd konfiguracji Auth");
 
         const sheets = google.sheets({ version: 'v4', auth });
 
