@@ -20,11 +20,9 @@ function getGoogleAuth() {
     try {
         // 1. SPRAWDZAMY VERCEL (ZMIENNA)
         if (process.env.GOOGLE_CREDENTIALS) {
-            const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
-
 
             return new google.auth.JWT({
-                keyFile: credentials,
+                keyFile: process.env.GOOGLE_CREDENTIALS,
                 scopes: SCOPES
             });
         }
