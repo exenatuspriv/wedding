@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const {google} = require('googleapis');
+const { google } = require('googleapis');
 const path = require('path');
 const fs = require('fs');
 
@@ -8,47 +8,62 @@ const app = express();
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
-app.use(express.urlencoded({extended: true}));
+app.use(express.urlencoded({ extended: true }));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
-const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
+// --- FUNKCJA AUTH (JEDNA ZMIENNA) ---
+function getGoogleAuth() {
 
-try {
-    // 1. SPRAWDZAMY VERCEL (ZMIENNA)
-    if (process.env.GOOGLE_CREDENTIALS) {
 
-        const auth = new google.auth.JWT({
-            email: process.env.GOOGLE_CREDENTIALS.client_email,
-            key: process.env.GOOGLE_CREDENTIALS.private_key ? process.env.GOOGLE_CREDENTIALS.private_key.replace(/\\n/g, '\n') : undefined,
-            scopes: ['https://www.googleapis.com/auth/spreadsheets']
-        });
-        const sheets = google.sheets({version: 'v4', auth});
-    }
-    // 2. SPRAWDZAMY LOKALNIE (PLIK)
-    else {
+    try {
+        const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
+
+        // SCENARIUSZ 1: VERCEL (Cały JSON w jednej zmiennej)
+        if (process.env.GOOGLE_CREDENTIALS) {
+
+            // 1. Parsujemy cały JSON ze zmiennej
+            const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+
+            // 2. Wyciągamy klucz i naprawiamy entery (To jest kluczowe!)
+            // Vercel przekazuje \n jako tekst, a Google chce znaku nowej linii.
+            const privateKey = creds.private_key.replace(/\\n/g, '\n');
+
+            // 3. Tworzymy autoryzację
+            return new google.auth.JWT({
+                email: creds.client_email,
+                keyFile: null,
+                key: privateKey,
+                scopes: SCOPES,
+            });
+        }
+
+        // SCENARIUSZ 2: LOKALNIE (Plik)
         const credentialsPath = path.join(__dirname, 'credentials.json');
         if (fs.existsSync(credentialsPath)) {
-            const auth = new google.auth.JWT({
+            return new google.auth.JWT({
                 keyFile: credentialsPath,
                 scopes: SCOPES
             });
-            const sheets = google.sheets({version: 'v4', auth});
         }
+    } catch (error) {
+        console.error("❌ Błąd Auth:", error.message);
+        return null;
     }
-} catch (error) {
-    console.error("❌ Błąd tworzenia obiektu Auth:", error.message);
+    return null;
 }
-
 
 // --- TRASY ---
 
 app.get('/:token', async (req, res) => {
-    const {token} = req.params;
-    // Ignoruj requesty o ikonę i mapy źródłowe
-    if (token === 'favicon.ico' || token.endsWith('.map')) return res.status(204).end();
+    const { token } = req.params;
+    if (token === 'favicon.ico') return res.status(204).end();
 
     try {
+        const auth = getGoogleAuth();
+        if (!auth) throw new Error("Błąd: Nie udało się odczytać GOOGLE_CREDENTIALS");
+
+        const sheets = google.sheets({ version: 'v4', auth });
 
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: process.env.SHEET_ID,
@@ -63,7 +78,7 @@ app.get('/:token', async (req, res) => {
                 user: {
                     token: userRow[0],
                     title: userRow[1] || '',
-                    name: userRow[2] || '',
+                    name:  userRow[2] || '',
                     surname: userRow[3] || ''
                 }
             });
@@ -71,25 +86,20 @@ app.get('/:token', async (req, res) => {
             res.status(404).render('404');
         }
     } catch (error) {
-        console.error("🔥 Błąd GET:", error.message);
-        // Wypisz błąd na ekranie, żebyś widział co jest nie tak
-        res.status(500).send(`
-            <h1>Błąd Serwera</h1>
-            <p>${error.message}</p>
-            <p>Sprawdź logi Vercel po szczegóły.</p>
-        `);
+        console.error("Błąd GET:", error.message);
+        res.status(500).send(`Błąd: ${error.message}`);
     }
 });
 
 app.post('/confirm/:token', async (req, res) => {
-    const {token} = req.params;
-    const {status, comment} = req.body;
+    const { token } = req.params;
+    const { status, comment } = req.body;
 
     try {
         const auth = getGoogleAuth();
-        if (!auth) throw new Error("Błąd konfiguracji Auth");
+        if (!auth) throw new Error("Błąd Auth");
 
-        const sheets = google.sheets({version: 'v4', auth});
+        const sheets = google.sheets({ version: 'v4', auth });
 
         const getRows = await sheets.spreadsheets.values.get({
             spreadsheetId: process.env.SHEET_ID,
@@ -105,15 +115,15 @@ app.post('/confirm/:token', async (req, res) => {
                 spreadsheetId: process.env.SHEET_ID,
                 range: `Arkusz1!E${rowIndex}:G${rowIndex}`,
                 valueInputOption: 'RAW',
-                requestBody: {values: [[status === 'yes' ? 'TAK' : 'NIE BĘDĘ', comment, timestamp]]}
+                requestBody: { values: [[ status === 'yes' ? 'TAK' : 'NIE BĘDĘ', comment, timestamp ]] }
             });
-            res.json({success: true});
+            res.json({ success: true });
         } else {
-            res.status(404).json({success: false});
+            res.status(404).json({ success: false });
         }
     } catch (error) {
         console.error("Błąd POST:", error.message);
-        res.status(500).json({success: false, error: error.message});
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
