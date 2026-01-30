@@ -95,6 +95,10 @@ app.get('/:token', async (req, res) => {
     }
 });
 
+app.get('/', (req, res) => {
+    res.status(404).render('404');
+});
+
 app.post('/confirm/:token', async (req, res) => {
     const { token } = req.params;
     const { status, comment } = req.body;
