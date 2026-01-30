@@ -21,10 +21,12 @@ function getGoogleAuth() {
         // 1. SPRAWDZAMY VERCEL (ZMIENNA)
         if (process.env.GOOGLE_CREDENTIALS) {
 
-            return new google.auth.JWT({
-                keyFile: process.env.GOOGLE_CREDENTIALS,
-                scopes: SCOPES
+           const auth = new google.auth.GoogleAuth({
+                credentials: process.env.GOOGLE_CREDENTIALS,
+                scopes: SCOPES,
             });
+           // Pobieramy klienta
+           return auth.getClient();
         }
         // 2. SPRAWDZAMY LOKALNIE (PLIK)
         else {
