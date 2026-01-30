@@ -22,19 +22,11 @@ function getGoogleAuth() {
         if (process.env.GOOGLE_CREDENTIALS) {
             const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
 
-            // NAPRAWA KLUCZA (Vercel Newline Fix)
-            const privateKey = credentials.private_key
-                ? credentials.private_key.replace(/\\n/g, '\n')
-                : undefined;
 
-            if (!privateKey) throw new Error("Brak private_key w zmiennej GOOGLE_CREDENTIALS");
-
-            return new google.auth.JWT(
-                credentials.client_email,
-                null,
-                privateKey,
-                SCOPES
-            );
+            return new google.auth.JWT({
+                keyFile: credentials,
+                scopes: SCOPES
+            });
         }
         // 2. SPRAWDZAMY LOKALNIE (PLIK)
         else {
