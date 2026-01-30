@@ -3,125 +3,148 @@ const express = require('express');
 const { google } = require('googleapis');
 const path = require('path');
 const fs = require('fs');
+
 const app = express();
 
-// Konfiguracja Express
+// --- KONFIGURACJA EXPRESS ---
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views')); // Dla pewności na Vercel
 
-// --- KONFIGURACJA GOOGLE API ---
-const credentialsPath = path.join(__dirname, 'credentials.json');
+// --- KONFIGURACJA GOOGLE SHEETS (HYBRYDOWA) ---
+let authClient;
+const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 
-// Sprawdzenie pliku na starcie serwera
-if (!fs.existsSync(credentialsPath)) {
-    console.error("❌ BŁĄD KRYTYCZNY: Brak pliku credentials.json!");
-    process.exit(1);
+try {
+    // SCENARIUSZ 1: VERCEL (Zmienna środowiskowa)
+    if (process.env.GOOGLE_CREDENTIALS) {
+        console.log("🔒 Start: Wykryto zmienną środowiskową GOOGLE_CREDENTIALS (Tryb Vercel)");
+
+        // Parsujemy treść JSON ze zmiennej
+        const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+
+        authClient = new google.auth.JWT(
+            credentials.client_email,
+            null,
+            credentials.private_key,
+            SCOPES
+        );
+    }
+    // SCENARIUSZ 2: LOKALNIE (Plik na dysku)
+    else {
+        const credentialsPath = path.join(__dirname, 'credentials.json');
+
+        if (fs.existsSync(credentialsPath)) {
+            console.log("📂 Start: Wykryto plik credentials.json (Tryb Lokalny)");
+            authClient = new google.auth.JWT({
+                keyFile: credentialsPath,
+                scopes: SCOPES
+            });
+        } else {
+            // Jeśli nie ma ani zmiennej, ani pliku - rzucamy błąd, ale nie zabijamy procesu od razu
+            console.error("⚠️ OSTRZEŻENIE: Brak konfiguracji Google Auth (Zmienna lub Plik). Aplikacja może nie działać poprawnie.");
+        }
+    }
+} catch (error) {
+    console.error("❌ Błąd krytyczny konfiguracji Google:", error.message);
 }
 
-// Inicjalizacja autoryzacji raz dla całego serwera (Zapis + Odczyt)
-const authClient = new google.auth.JWT({
-    keyFile: credentialsPath,
-    // USUNIĘTO .readonly aby móc zapisywać dane (RSVP)
-    scopes: ['https://www.googleapis.com/auth/spreadsheets']
-});
-
+// Inicjalizacja klienta Arkuszy
 const sheets = google.sheets({ version: 'v4', auth: authClient });
-// --- KONIEC KONFIGURACJI ---
 
-// TRASA GET: Wyświetlanie zaproszenia
+// --- TRASY (ROUTES) ---
+
+// 1. Wyświetlanie zaproszenia (GET)
 app.get('/:token', async (req, res) => {
     const { token } = req.params;
+
+    // Ignoruj prośby o ikonkę
     if (token === 'favicon.ico') return res.status(204).end();
 
-    console.log(`\n--- [PROCES GET] Użytkownik: ${token} ---`);
-
     try {
-        // Pobieramy kolumny A, B i C (Token, Imię, Nazwisko)
+        if (!process.env.SHEET_ID) throw new Error("Brak zmiennej SHEET_ID");
+
+        // Pobieramy dane użytkownika (Kolumny A-D: Token, Tytuł, Imię, Nazwisko)
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: process.env.SHEET_ID,
-            range: 'Arkusz1!A:Z',
+            range: 'Arkusz1!A:D',
         });
+
         const rows = response.data.values;
         const userRow = rows?.find(row => row[0] === token);
 
         if (userRow) {
-            // Mapujemy kolumny na czytelne zmienne
-            const userData = {
-                token:   userRow[0], // Kolumna A
-                title:   userRow[1], // Kolumna B (np. "Sz.P.")
-                name:    userRow[2], // Kolumna C (np. "Filipie")
-                wedding: userRow[3] || '' // Kolumna D (np. "Kowalski")
-            };
-
-            console.log(`✅ Znaleziono: ${userData.title} ${userData.name}`);
-
-            if(userData.wedding === 'NIE') {
-                res.render('index', {user: userData});
-            } else {
-                res.render('index2', {user: userData});
-            }
+            res.render('index', {
+                user: {
+                    token: userRow[0],
+                    title: userRow[1] || '',
+                    name:  userRow[2] || '',
+                    surname: userRow[3] || ''
+                }
+            });
         } else {
             res.status(404).render('404');
         }
-
     } catch (error) {
-        console.error("!!! BŁĄD SERWERA (GET) !!!", error.message);
-        res.status(500).send("Wystąpił błąd podczas ładowania strony.");
+        console.error("Błąd trasy GET:", error.message);
+        res.status(500).send(`Wystąpił błąd serwera: ${error.message}`);
     }
 });
 
-// TRASA POST: Zapisywanie RSVP w Excelu
+// 2. Obsługa formularza RSVP (POST)
 app.post('/confirm/:token', async (req, res) => {
     const { token } = req.params;
     const { status, comment } = req.body;
 
-    console.log(`\n--- [PROCES POST] RSVP od: ${token} ---`);
-    console.log(`Status: ${status}, Komentarz: ${comment}`);
-
     try {
-        // 1. Szukamy wiersza z tokenem
+        if (!authClient) throw new Error("Brak autoryzacji Google");
+
+        // Pobieramy kolumnę A, żeby znaleźć numer wiersza
         const getRows = await sheets.spreadsheets.values.get({
             spreadsheetId: process.env.SHEET_ID,
             range: 'Arkusz1!A:A',
         });
 
         const rows = getRows.data.values;
-        if (!rows) throw new Error("Brak danych w arkuszu");
-
-        const rowIndex = rows.findIndex(row => row[0] === token) + 1;
+        const rowIndex = rows.findIndex(row => row[0] === token) + 1; // +1 bo Arkusze liczą od 1
 
         if (rowIndex > 0) {
-            // 2. Aktualizujemy kolumny D i E (Potwierdzenie i Komentarz)
-            // Zakładamy: D to "Potwierdzenie", E to "Komentarz"
+            const timestamp = new Date().toLocaleString('pl-PL');
+
+            // Zapisujemy: Status, Komentarz, Datę (Kolumny E, F, G)
             await sheets.spreadsheets.values.update({
                 spreadsheetId: process.env.SHEET_ID,
-                range: `Arkusz1!E${rowIndex}:F${rowIndex}`,
+                range: `Arkusz1!E${rowIndex}:G${rowIndex}`,
                 valueInputOption: 'RAW',
                 requestBody: {
-                    values: [[status === 'yes' ? 'TAK' : 'NIE BĘDĘ', comment]]
+                    values: [[
+                        status === 'yes' ? 'TAK' : 'NIE BĘDĘ',
+                        comment,
+                        timestamp
+                    ]]
                 }
             });
 
-            console.log(`✅ Zapisano RSVP w wierszu ${rowIndex}`);
+            console.log(`✅ Zapisano RSVP dla tokenu: ${token}`);
             res.json({ success: true });
         } else {
-            console.log("❌ Nie znaleziono wiersza do aktualizacji.");
-            res.status(404).json({ success: false, message: "Token nie istnieje" });
+            res.status(404).json({ success: false, message: "Nie znaleziono tokenu" });
         }
     } catch (error) {
-        console.error("!!! BŁĄD ZAPISU (POST) !!!", error.message);
+        console.error("Błąd trasy POST:", error.message);
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// Start serwera
-const PORT = 3000;
-app.listen(PORT, () => {
-    console.log(`
-    -------------------------------------------
-    🚀 Serwer nasłuchuje na http://localhost:${PORT}
-    -------------------------------------------
-    `);
-});
+// --- START SERWERA (VERCEL COMPATIBLE) ---
+// Vercel wymaga eksportu aplikacji, a lokalnie chcemy nasłuchiwać na porcie.
+if (require.main === module) {
+    const PORT = process.env.PORT || 3000;
+    app.listen(PORT, () => {
+        console.log(`🚀 Serwer uruchomiony lokalnie: http://localhost:${PORT}`);
+    });
+}
+
+module.exports = app;
