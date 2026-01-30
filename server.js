@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const { google } = require('googleapis');
+const {google} = require('googleapis');
 const path = require('path');
 const fs = require('fs');
 
@@ -8,61 +8,48 @@ const app = express();
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({extended: true}));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
-// --- FUNKCJA POMOCNICZA: POBIERZ AUTORYZACJĘ ---
-// Ta funkcja uruchamia się przy KAŻDYM zapytaniu, gwarantując świeże dane.
-function getGoogleAuth() {
-    const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
+const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 
-    try {
-        // 1. SPRAWDZAMY VERCEL (ZMIENNA)
-        if (process.env.GOOGLE_CREDENTIALS) {
+try {
+    // 1. SPRAWDZAMY VERCEL (ZMIENNA)
+    if (process.env.GOOGLE_CREDENTIALS) {
 
-           const auth = new google.auth.GoogleAuth({
-                credentials: process.env.GOOGLE_CREDENTIALS,
-                scopes: SCOPES,
-            });
-           // Pobieramy klienta
-           return auth.getClient();
-        }
-        // 2. SPRAWDZAMY LOKALNIE (PLIK)
-        else {
-            const credentialsPath = path.join(__dirname, 'credentials.json');
-            if (fs.existsSync(credentialsPath)) {
-                return new google.auth.JWT({
-                    keyFile: credentialsPath,
-                    scopes: SCOPES
-                });
-            }
-        }
-    } catch (error) {
-        console.error("❌ Błąd tworzenia obiektu Auth:", error.message);
-        return null;
+        const auth = new google.auth.JWT({
+            email: process.env.GOOGLE_CLIENT_EMAIL,
+            key: process.env.GOOGLE_PRIVATE_KEY ? process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined,
+            scopes: ['https://www.googleapis.com/auth/spreadsheets']
+        });
+        const sheets = google.sheets({version: 'v4', auth});
     }
-    return null;
+    // 2. SPRAWDZAMY LOKALNIE (PLIK)
+    else {
+        const credentialsPath = path.join(__dirname, 'credentials.json');
+        if (fs.existsSync(credentialsPath)) {
+            const auth = new google.auth.JWT({
+                keyFile: credentialsPath,
+                scopes: SCOPES
+            });
+            const sheets = google.sheets({version: 'v4', auth});
+        }
+    }
+} catch (error) {
+    console.error("❌ Błąd tworzenia obiektu Auth:", error.message);
 }
+
 
 // --- TRASY ---
 
 app.get('/:token', async (req, res) => {
-    const { token } = req.params;
+    const {token} = req.params;
     // Ignoruj requesty o ikonę i mapy źródłowe
     if (token === 'favicon.ico' || token.endsWith('.map')) return res.status(204).end();
 
     try {
-        // 1. POBIERZ AUTH TERAZ (nie globalnie)
-        const auth = getGoogleAuth();
-        if (!auth) {
-            throw new Error("Nie udało się skonfigurować autoryzacji Google (Brak zmiennej lub pliku).");
-        }
 
-        // 2. UTWÓRZ KLIENTA SHEETS Z TYM AUTH
-        const sheets = google.sheets({ version: 'v4', auth });
-
-        // 3. WYKONAJ ZAPYTANIE
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: process.env.SHEET_ID,
             range: 'Arkusz1!A:D',
@@ -76,7 +63,7 @@ app.get('/:token', async (req, res) => {
                 user: {
                     token: userRow[0],
                     title: userRow[1] || '',
-                    name:  userRow[2] || '',
+                    name: userRow[2] || '',
                     surname: userRow[3] || ''
                 }
             });
@@ -95,14 +82,14 @@ app.get('/:token', async (req, res) => {
 });
 
 app.post('/confirm/:token', async (req, res) => {
-    const { token } = req.params;
-    const { status, comment } = req.body;
+    const {token} = req.params;
+    const {status, comment} = req.body;
 
     try {
         const auth = getGoogleAuth();
         if (!auth) throw new Error("Błąd konfiguracji Auth");
 
-        const sheets = google.sheets({ version: 'v4', auth });
+        const sheets = google.sheets({version: 'v4', auth});
 
         const getRows = await sheets.spreadsheets.values.get({
             spreadsheetId: process.env.SHEET_ID,
@@ -118,15 +105,15 @@ app.post('/confirm/:token', async (req, res) => {
                 spreadsheetId: process.env.SHEET_ID,
                 range: `Arkusz1!E${rowIndex}:G${rowIndex}`,
                 valueInputOption: 'RAW',
-                requestBody: { values: [[ status === 'yes' ? 'TAK' : 'NIE BĘDĘ', comment, timestamp ]] }
+                requestBody: {values: [[status === 'yes' ? 'TAK' : 'NIE BĘDĘ', comment, timestamp]]}
             });
-            res.json({ success: true });
+            res.json({success: true});
         } else {
-            res.status(404).json({ success: false });
+            res.status(404).json({success: false});
         }
     } catch (error) {
         console.error("Błąd POST:", error.message);
-        res.status(500).json({ success: false, error: error.message });
+        res.status(500).json({success: false, error: error.message});
     }
 });
 
