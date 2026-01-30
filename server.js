@@ -19,8 +19,8 @@ try {
     if (process.env.GOOGLE_CREDENTIALS) {
 
         const auth = new google.auth.JWT({
-            email: process.env.GOOGLE_CLIENT_EMAIL,
-            key: process.env.GOOGLE_PRIVATE_KEY ? process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined,
+            email: process.env.GOOGLE_CREDENTIALS.client_email,
+            key: process.env.GOOGLE_CREDENTIALS.private_key ? process.env.GOOGLE_CREDENTIALS.private_key.replace(/\\n/g, '\n') : undefined,
             scopes: ['https://www.googleapis.com/auth/spreadsheets']
         });
         const sheets = google.sheets({version: 'v4', auth});
