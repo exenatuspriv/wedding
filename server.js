@@ -73,15 +73,19 @@ app.get('/:token', async (req, res) => {
         const rows = response.data.values;
         const userRow = rows?.find(row => row[0] === token);
 
-        if (userRow) {
-            res.render('index', {
-                user: {
+        const userData = {
                     token: userRow[0],
                     title: userRow[1] || '',
                     name:  userRow[2] || '',
-                    surname: userRow[3] || ''
-                }
-            });
+                    wedding: userRow[3] || ''
+        }
+
+        if (userRow) {
+            if(userData.wedding === 'TAK'){
+                res.render('index2', user = userData);
+            } else {
+                res.render('index', user = userData);
+            }
         } else {
             res.status(404).render('404');
         }
