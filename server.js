@@ -21,6 +21,9 @@ async function getGoogleAuth() {
             // Naprawa klucza - Vercel czasem zamienia \n na tekst
             const privateKey = credentials.private_key.replace(/\\n/g, '\n');
 
+            console.log('pokaż mi co tutaj mam' + credentials.client_email + '<br/> a tutaj' + privateKey);
+
+
             const auth = new google.auth.JWT(
                 credentials.client_email,
                 null,
