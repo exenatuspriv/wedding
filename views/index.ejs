@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brúðlaup: Pauliny & Filipa</title>
+
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700;900&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+    <script src="https://unpkg.com/lenis@1.3.17/dist/lenis.min.js"></script>
+
+    <style>
+        /* --- PALETA I ZMIENNE --- */
+        :root {
+            --bg-deep: #05080a;
+            --gold-gradient: linear-gradient(135deg, #bf953f 0%, #fcf6ba 25%, #b38728 50%, #fbf5b7 75%, #aa771c 100%);
+            --gold-text: linear-gradient(to bottom, #fcf6ba, #bf953f);
+        }
+
+        body {
+            background-color: var(--bg-deep);
+            color: #e2e8f0;
+            font-family: 'Cormorant Garamond', serif;
+            overflow-x: hidden;
+            margin: 0;
+        }
+
+        .runic { font-family: 'Cinzel Decorative', cursive; }
+
+        /* --- TŁO I PARTICLES --- */
+        #embers-canvas {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 1; mix-blend-mode: screen;
+        }
+
+        .vignette {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle, transparent 40%, #05080a 100%);
+            z-index: 2; pointer-events: none;
+        }
+
+        .video-bg {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            object-fit: cover; z-index: 0;
+            filter: sepia(30%) contrast(1.1) brightness(0.4) saturate(1.2);
+        }
+
+        /* --- STYL 3D / KOMIKSOWY --- */
+        .gold-text {
+            background: var(--gold-text);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.8));
+        }
+
+        .viking-panel {
+            background: rgba(13, 17, 23, 0.85);
+            backdrop-filter: blur(16px);
+            border: 2px solid transparent;
+            position: relative;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.8), inset 0 0 30px rgba(0,0,0,0.8);
+            border-image: var(--gold-gradient) 1;
+            transform-style: preserve-3d;
+        }
+
+        .corner-rune {
+            position: absolute; width: 20px; height: 20px;
+            border: 2px solid #bf953f;
+            transition: all 0.5s ease;
+        }
+        .tl { top: -2px; left: -2px; border-right: 0; border-bottom: 0; }
+        .br { bottom: -2px; right: -2px; border-left: 0; border-top: 0; }
+
+        /* --- FORMULARZ --- */
+        .input-slot {
+            background: #05080a;
+            border: 1px solid #334155;
+            color: #bf953f;
+            box-shadow: inset 0 2px 10px rgba(0,0,0,0.8);
+            transition: all 0.3s ease;
+        }
+        .input-slot:focus {
+            border-color: #bf953f;
+            box-shadow: 0 0 15px rgba(191, 149, 63, 0.2), inset 0 2px 5px rgba(0,0,0,0.5);
+        }
+
+        .btn-gold {
+            background: var(--gold-gradient);
+            color: #0f172a;
+            font-family: 'Cinzel Decorative', cursive;
+            font-weight: 900;
+            text-shadow: 0 1px 0 rgba(255,255,255,0.4);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.4);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .btn-gold:hover {
+            transform: translateY(-2px) scale(1.02);
+            box-shadow: 0 10px 25px rgba(191, 149, 63, 0.4), inset 0 1px 0 rgba(255,255,255,0.4);
+        }
+
+        .radio-box {
+            border: 1px solid rgba(191, 149, 63, 0.3);
+            background: rgba(0,0,0,0.4);
+            transition: all 0.3s;
+        }
+        input:checked + .radio-box {
+            border: 1px solid #bf953f;
+            background: linear-gradient(to bottom, rgba(191,149,63,0.1), transparent);
+            box-shadow: 0 0 15px rgba(191, 149, 63, 0.2);
+        }
+        input:checked + .radio-box span.status-icon {
+            color: #bf953f;
+            text-shadow: 0 0 10px #bf953f;
+        }
+
+        ::-webkit-scrollbar { width: 0; }
+
+        @keyframes flow {
+            0% { transform: translateY(-100%); opacity: 0; }
+            50% { opacity: 1; }
+            100% { transform: translateY(100%); opacity: 0; }
+        }
+        .scroll-flow {
+            animation: flow 2s cubic-bezier(0.7, 0, 0.3, 1) infinite;
+        }
+    </style>
+</head>
+<body>
+
+    <video autoplay muted loop playsinline class="video-bg">
+        <source src="/video.mp4" type="video/mp4">
+    </video>
+
+    <canvas id="embers-canvas"></canvas>
+
+    <div class="vignette"></div>
+
+    <main class="relative z-10">
+
+        <section class="min-h-screen flex flex-col justify-center items-center text-center px-4 relative pt-10 pb-20">
+
+            <div class="mb-4 reveal-y">
+                <span class="text-[var(--gold)] tracking-[0.4em] text-[10px] md:text-xs uppercase font-bold border-b border-[#bf953f] pb-2">
+                    Zaproszenie
+                </span>
+            </div>
+
+            <h1 class="text-6xl md:text-9xl runic leading-none mb-4 drop-shadow-2xl">
+                <div class="overflow-hidden"><span class="block reveal-text text-stone-400 text-5xl md:text-7xl mb-2"><%= user.title %></span></div>
+                <div class="overflow-hidden"><span class="block reveal-text gold-text"><%= user.name %></span></div>
+            </h1>
+
+            <div class="w-16 h-16 my-4 reveal-scale">
+                <svg viewBox="0 0 100 100" fill="none" stroke="#bf953f" stroke-width="1.5" class="w-full h-full drop-shadow-[0_0_10px_rgba(191,149,63,0.5)]">
+                    <path d="M50 10 L90 50 L50 90 L10 50 Z" />
+                    <circle cx="50" cy="50" r="15" />
+                    <path d="M50 25 L50 75 M25 50 L75 50" stroke-opacity="0.5"/>
+                </svg>
+            </div>
+
+            <div class="w-full max-w-4xl viking-panel p-10 md:p-20 group">
+                <h3 class="text-2xl md:text-4xl text-[#bf953f] runic tracking-wide drop-shadow-md">
+                    Na brodę Odyna!
+                </h3>
+            <br/>
+            <br/>
+                <p class="text-lg md:text-xl text-stone-200 leading-relaxed serif italic">
+                    Postanowiliśmy połączyć nasze tarcze i żyć pod jednym dachem. Wielka to radość w Asgardzie i w sercach naszych.
+                    Chcemy, by ten dzień zapisał się w pieśniach, dlatego pragniemy dzielić go z tymi, których cenimy nade złoto i stal.<br/>
+                    <br/>
+                    <b>Stawcie się u naszych wrót – zapraszamy Was serdecznie!</b>
+                </p>
+            </div>
+
+            <div class="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 reveal-info-delay">
+                <span class="text-[9px] uppercase tracking-[0.3em] text-[#bf953f]">Odkryj przeznaczenie</span>
+                <div class="w-px h-12 bg-[#bf953f]/20 overflow-hidden relative">
+                    <div class="w-full h-full bg-[#bf953f] scroll-flow absolute top-0 left-0"></div>
+                </div>
+            </div>
+        </section>
+
+
+
+
+
+        <section class="min-h-screen flex items-center justify-center py-20 px-4 relative">
+            <div class="w-full max-w-4xl viking-panel p-10 md:p-20 group">
+                <div class="corner-rune tl group-hover:w-8 group-hover:h-8"></div>
+                <div class="corner-rune br group-hover:w-8 group-hover:h-8"></div>
+
+                <div class="text-center mb-16">
+                    <h2 class="runic text-4xl md:text-5xl text-white mb-2">Wielka Uczta</h2>
+                    <div class="h-1 w-20 bg-[var(--gold-text)] mx-auto rounded-full"></div>
+                </div>
+
+                <div class="grid md:grid-cols-2 gap-12 relative">
+                    <div class="hidden md:block absolute left-1/2 top-0 bottom-0 w-px bg-gradient-to-b from-transparent via-[#bf953f] to-transparent opacity-30"></div>
+
+                    <div class="text-center md:text-right pr-0 md:pr-10 space-y-2">
+                        <p class="text-[#bf953f] text-xs uppercase tracking-[0.3em] font-bold">Kiedy</p>
+                        <p class="runic text-3xl text-white">21 marca 2026</p>
+                        <p class="text-stone-400 italic text-lg">godzina: 18:00</p>
+                    </div>
+
+                    <div class="text-center md:text-left pl-0 md:pl-10 space-y-2">
+                        <p class="text-[#bf953f] text-xs uppercase tracking-[0.3em] font-bold">Gdzie</p>
+                        <p class="runic text-3xl text-white">Nasz Asgard</p>
+                        <p class="text-stone-400 italic text-lg">Bąkówka, ul. Czarowna 26/1</p>
+                    </div>
+                </div>
+
+                <div class="mt-16 text-center border-t border-[#bf953f]/20 pt-10">
+                     <p class="text-[#bf953f] text-xs uppercase tracking-[0.3em] font-bold mb-4">Co się dzieje?</p>
+                     <p class="text-2xl text-stone-200">Chcemy z Wami świętować <b>Nasz Wielki Dzień</b>. Nie robimy klasycznego wesela - tylko party w Naszym "Asgardzie". </p>
+                     <p class="text-sm text-stone-500 mt-2">Liczymy tylko na obecność i wspólne wypicie toastu. </p>
+                </div>
+
+            </div>
+             <div class="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 reveal-info-delay">
+                <span class="text-[9px] uppercase tracking-[0.3em] text-[#bf953f]">Daj nam znać!</span>
+                <div class="w-px h-12 bg-[#bf953f]/20 overflow-hidden relative">
+                    <div class="w-full h-full bg-[#bf953f] scroll-flow absolute top-0 left-0"></div>
+                </div>
+            </div>
+
+        </section>
+
+        <section class="min-h-screen flex items-center justify-center py-20 px-4">
+            <div class="w-full max-w-4xl viking-panel p-8 md:p-16">
+                <h2 class="runic text-4xl md:text-5xl text-center text-white mb-12 gold-text">Twoja Odpowiedź</h2>
+
+                <form id="rsvp-form" method="POST" class="space-y-8" action="/confirm/<%= user.token %>">
+
+                    <div class="grid md:grid-cols-2 gap-6">
+                        <label class="cursor-pointer group">
+                            <input type="radio" name="status" value="yes" class="hidden" checked>
+                            <div class="radio-box py-6 px-4 text-center rounded-sm">
+                                <div class="text-2xl mb-2 status-icon text-stone-600 transition-colors">⚔️</div>
+                                <span class="runic text-xl text-white block">Przybędę</span>
+                                <span class="text-[10px] uppercase tracking-widest text-stone-500">Ku chwale!</span>
+                            </div>
+                        </label>
+
+                        <label class="cursor-pointer group">
+                            <input type="radio" name="status" value="no" class="hidden">
+                            <div class="radio-box py-6 px-4 text-center rounded-sm">
+                                <div class="text-2xl mb-2 status-icon text-stone-600 transition-colors">🛡️</div>
+                                <span class="runic text-xl text-white block">Nie mogę</span>
+                                <span class="text-[10px] uppercase tracking-widest text-stone-500">Inne bitwy wzywają</span>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div class="relative">
+                        <label class="block text-[#bf953f] text-[10px] uppercase tracking-widest mb-2 ml-2">Wiadomość do Gospodarzy</label>
+                        <textarea name="comment" rows="2" class="input-slot w-full p-4 outline-none text-lg rounded-sm" placeholder="Twoje słowa..."></textarea>
+                    </div>
+
+                    <button type="submit" class="btn-gold w-full py-5 text-xl tracking-widest uppercase rounded-sm">
+                        Zapieczętuj
+                    </button>
+                </form>
+
+                <div id="success-msg" class="hidden text-center mt-8">
+                     <p class="runic text-3xl gold-text mb-2">Przyjęto!</p>
+                     <p class="text-stone-400">Twój kruk dotarł do celu.</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        // --- 1. LENIS SMOOTH SCROLL ---
+        const lenis = new Lenis({ duration: 1.5, easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)) });
+        function raf(time) { lenis.raf(time); requestAnimationFrame(raf); }
+        requestAnimationFrame(raf);
+
+        // --- 2. GSAP ANIMACJE ---
+        gsap.registerPlugin(ScrollTrigger);
+
+        const tl = gsap.timeline();
+        tl.to(".reveal-text", { y: 0, opacity: 1, duration: 1.5, stagger: 0.2, ease: "power4.out", delay: 0.2 })
+          .to(".reveal-y", { y: 0, opacity: 1, duration: 1 }, "-=1")
+          .to(".reveal-scale", { scale: 1, opacity: 1, duration: 1.5, ease: "back.out(1.7)" }, "-=1")
+          .to(".reveal-info-delay", { opacity: 1, duration: 1 }, "-=0.5");
+
+        gsap.utils.toArray('.viking-panel').forEach(panel => {
+            gsap.from(panel, {
+                scrollTrigger: { trigger: panel, start: "top 85%" },
+                y: 100, opacity: 0, duration: 1.2, ease: "power2.out"
+            });
+        });
+
+        // --- 3. PARTICLES ---
+        const canvas = document.getElementById('embers-canvas');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+        let particles = [];
+
+        function resize() { width = canvas.width = window.innerWidth; height = canvas.height = window.innerHeight; }
+        window.addEventListener('resize', resize);
+        resize();
+
+        class Particle {
+            constructor() { this.reset(); }
+            reset() {
+                this.x = Math.random() * width;
+                this.y = height + Math.random() * 100;
+                this.speed = 0.5 + Math.random() * 1.5;
+                this.size = 1 + Math.random() * 2;
+                this.opacity = 0.1 + Math.random() * 0.5;
+                this.fade = 0.005 + Math.random() * 0.01;
+            }
+            update() {
+                this.y -= this.speed;
+                this.opacity -= this.fade;
+                if (this.opacity <= 0) this.reset();
+            }
+            draw() {
+                ctx.fillStyle = `rgba(191, 149, 63, ${this.opacity})`;
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = "#bf953f";
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            }
+        }
+
+        for (let i = 0; i < 60; i++) particles.push(new Particle());
+
+        function animate() {
+            ctx.clearRect(0, 0, width, height);
+            particles.forEach(p => { p.update(); p.draw(); });
+            requestAnimationFrame(animate);
+        }
+        animate();
+
+        // --- 4. FORMULARZ (POPRAWIONY) ---
+        document.getElementById('rsvp-form').addEventListener('submit', async (e) => {
+            // KLUCZOWE: Zapobiega przeładowaniu strony i dodawaniu ?status=yes do URL
+            e.preventDefault();
+
+            const btn = e.target.querySelector('button');
+            const originalText = btn.innerText;
+            btn.innerText = "WYSYŁANIE KRUKA...";
+            btn.style.opacity = 0.8;
+            btn.disabled = true;
+
+            const formData = new FormData(e.target);
+            const data = Object.fromEntries(formData.entries());
+
+            try {
+                // Upewniamy się, że user.token jest poprawnie wstawiony
+                const response = await fetch('/confirm/<%= user.token %>', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    gsap.to("#rsvp-form", { opacity: 0, scale: 0.9, duration: 0.5, onComplete: () => {
+                        document.getElementById('rsvp-form').classList.add('hidden');
+                        const msg = document.getElementById('success-msg');
+                        msg.classList.remove('hidden');
+                        gsap.from(msg, { scale: 0.5, opacity: 0, ease: "back.out" });
+                    }});
+                } else {
+                    console.error("Serwer zwrócił błąd:", await response.text());
+                    throw new Error("Błąd serwera");
+                }
+            } catch (err) {
+                console.error("Błąd wysyłania:", err);
+                btn.innerText = "BŁĄD POŁĄCZENIA";
+                btn.disabled = false;
+                alert("Kruk zgubił drogę (błąd sieci). Spróbuj ponownie.");
+            }
+        });
+    </script>
+</body>
+</html>
