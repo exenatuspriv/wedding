@@ -6,59 +6,81 @@ const fs = require('fs');
 
 const app = express();
 
-// --- KONFIGURACJA EXPRESS ---
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
-// --- KONFIGURACJA GOOGLE AUTH ---
+// --- DIAGNOSTYKA ZMIENNYCH (NOWOŚĆ) ---
+// Wejdź na adres /debug-config po wgraniu tego kodu
+app.get('/debug-config', (req, res) => {
+    const report = {
+        sheet_id_exists: !!process.env.SHEET_ID,
+        sheet_id_value: process.env.SHEET_ID ? process.env.SHEET_ID.substring(0, 5) + '...' : 'BRAK',
+        creds_exists: !!process.env.GOOGLE_CREDENTIALS,
+        creds_parsing: null,
+        private_key_analysis: null
+    };
+
+    if (process.env.GOOGLE_CREDENTIALS) {
+        try {
+            const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+            report.creds_parsing = "OK (JSON poprawny)";
+            report.client_email = creds.client_email;
+
+            if (creds.private_key) {
+                const pk = creds.private_key;
+                report.private_key_analysis = {
+                    exists: true,
+                    length: pk.length,
+                    starts_with: pk.substring(0, 15) + '...',
+                    // SPRAWDZAMY FORMATOWANIE KLUCZA
+                    contains_literal_slash_n: pk.includes('\\n'), // Czy ma tekst "\n"?
+                    contains_real_newline: pk.includes('\n'),     // Czy ma prawdziwy enter?
+                    fixed_version_preview: pk.replace(/\\n/g, '\n').substring(25, 40) + '...'
+                };
+            } else {
+                report.private_key_analysis = "BRAK POLA private_key W JSON";
+            }
+        } catch (e) {
+            report.creds_parsing = "BŁĄD PARSOWANIA JSON: " + e.message;
+            report.raw_preview = process.env.GOOGLE_CREDENTIALS.substring(0, 20);
+        }
+    } else {
+        report.creds_parsing = "Brak zmiennej GOOGLE_CREDENTIALS";
+    }
+
+    res.json(report);
+});
+// ----------------------------------------
+
+// --- KONFIGURACJA AUTH Z NAPRAWĄ KLUCZA ---
 let authClient;
 const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 
 try {
-    // 1. SPRAWDZANIE ZMIENNEJ (VERCEL)
     if (process.env.GOOGLE_CREDENTIALS) {
-        console.log("🔒 Start: Próba autoryzacji z Vercel...");
-
-        let credentials;
-        try {
-            credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
-        } catch (e) {
-            console.error("❌ BŁĄD: Zmienna GOOGLE_CREDENTIALS nie jest poprawnym JSON-em.");
-            throw e;
-        }
-
-        // --- KLUCZOWA NAPRAWA (MAGIC FIX) ---
-        // Vercel często psuje klucz zamieniając entery na tekst "\n".
-        // Musimy to naprawić ręcznie.
-        const rawPrivateKey = credentials.private_key;
-        if (!rawPrivateKey) throw new Error("Brak pola private_key w JSON!");
-
-        const fixedPrivateKey = rawPrivateKey.replace(/\\n/g, '\n');
-        // ------------------------------------
+        const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+        // Magiczna naprawa klucza:
+        const privateKey = credentials.private_key.replace(/\\n/g, '\n');
 
         authClient = new google.auth.JWT(
             credentials.client_email,
             null,
-            fixedPrivateKey,
+            privateKey,
             SCOPES
         );
-        console.log("✅ Autoryzacja JWT utworzona pomyślnie.");
-    }
-    // 2. SPRAWDZANIE PLIKU (LOKALNIE)
-    else {
+        console.log("🔒 Auth Client utworzony.");
+    } else {
+        // Fallback lokalny
         const credentialsPath = path.join(__dirname, 'credentials.json');
         if (fs.existsSync(credentialsPath)) {
-            console.log("📂 Start: Tryb Lokalny (plik znaleziony)");
             authClient = new google.auth.JWT({ keyFile: credentialsPath, scopes: SCOPES });
-        } else {
-            console.error("⚠️ OSTRZEŻENIE: Brak credentials.json i brak zmiennej ENV.");
         }
     }
 } catch (error) {
-    console.error("❌ Błąd krytyczny auth:", error.message);
+    console.error("Błąd auth:", error.message);
 }
 
 const sheets = google.sheets({ version: 'v4', auth: authClient });
@@ -67,10 +89,10 @@ const sheets = google.sheets({ version: 'v4', auth: authClient });
 
 app.get('/:token', async (req, res) => {
     const { token } = req.params;
-    if (token === 'favicon.ico') return res.status(204).end();
+    if (token === 'favicon.ico' || token === 'debug-config') return; // Ignoruj specjalne trasy
 
     try {
-        if (!authClient) throw new Error("Serwer nie jest zalogowany do Google.");
+        if (!authClient) throw new Error("Błąd konfiguracji Auth (serwer nie zalogowany)");
 
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: process.env.SHEET_ID,
@@ -81,38 +103,24 @@ app.get('/:token', async (req, res) => {
         const userRow = rows?.find(row => row[0] === token);
 
         if (userRow) {
-            res.render('index', {
-                user: {
-                    token: userRow[0],
-                    title: userRow[1] || '',
-                    name:  userRow[2] || '',
-                    surname: userRow[3] || ''
-                }
-            });
+            res.render('index', { user: { token: userRow[0], title: userRow[1], name: userRow[2], surname: userRow[3] } });
         } else {
             res.status(404).render('404');
         }
     } catch (error) {
-        console.error("🔥 BŁĄD GOOGLE API:", error.message);
-        res.status(500).send(`Błąd połączenia: ${error.message}`);
+        res.status(500).send(`BŁĄD SERWERA (Sprawdź /debug-config): ${error.message}`);
     }
 });
 
 app.post('/confirm/:token', async (req, res) => {
+    // ... (kod bez zmian) ...
     const { token } = req.params;
     const { status, comment } = req.body;
-
     try {
-        if (!authClient) throw new Error("Błąd autoryzacji serwera.");
-
-        const getRows = await sheets.spreadsheets.values.get({
-            spreadsheetId: process.env.SHEET_ID,
-            range: 'Arkusz1!A:A',
-        });
-
+        if (!authClient) throw new Error("Auth Error");
+        const getRows = await sheets.spreadsheets.values.get({ spreadsheetId: process.env.SHEET_ID, range: 'Arkusz1!A:A' });
         const rows = getRows.data.values;
         const rowIndex = rows.findIndex(row => row[0] === token) + 1;
-
         if (rowIndex > 0) {
             const timestamp = new Date().toLocaleString('pl-PL');
             await sheets.spreadsheets.values.update({
@@ -126,7 +134,6 @@ app.post('/confirm/:token', async (req, res) => {
             res.status(404).json({ success: false });
         }
     } catch (error) {
-        console.error("Błąd POST:", error.message);
         res.status(500).json({ success: false, error: error.message });
     }
 });
