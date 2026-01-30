@@ -6,52 +6,55 @@ const fs = require('fs');
 
 const app = express();
 
+// --- KONFIGURACJA EXPRESS ---
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
-// --- KONFIGURACJA Z DIAGNOSTYKĄ ---
+// --- KONFIGURACJA GOOGLE AUTH ---
 let authClient;
 const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 
 try {
+    // 1. SPRAWDZANIE ZMIENNEJ (VERCEL)
     if (process.env.GOOGLE_CREDENTIALS) {
-        console.log("🔒 Start: Próba odczytu zmiennej z Vercel...");
+        console.log("🔒 Start: Próba autoryzacji z Vercel...");
 
         let credentials;
         try {
             credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
         } catch (e) {
-            console.error("❌ BŁĄD JSON: Zmienna GOOGLE_CREDENTIALS ma zły format! Sprawdź cudzysłowy w Vercel.");
+            console.error("❌ BŁĄD: Zmienna GOOGLE_CREDENTIALS nie jest poprawnym JSON-em.");
             throw e;
         }
 
-        // --- DIAGNOSTYKA ---
-        if (!credentials.client_email) console.error("❌ BŁĄD: W JSON brakuje pola 'client_email'");
-        else console.log("✅ Email wykryty:", credentials.client_email);
+        // --- KLUCZOWA NAPRAWA (MAGIC FIX) ---
+        // Vercel często psuje klucz zamieniając entery na tekst "\n".
+        // Musimy to naprawić ręcznie.
+        const rawPrivateKey = credentials.private_key;
+        if (!rawPrivateKey) throw new Error("Brak pola private_key w JSON!");
 
-        if (!credentials.private_key) console.error("❌ BŁĄD: W JSON brakuje pola 'private_key'");
-        else console.log("✅ Klucz prywatny wykryty (długość):", credentials.private_key.length);
-        // -------------------
-
-        const privateKey = credentials.private_key.replace(/\\n/g, '\n');
+        const fixedPrivateKey = rawPrivateKey.replace(/\\n/g, '\n');
+        // ------------------------------------
 
         authClient = new google.auth.JWT(
             credentials.client_email,
             null,
-            privateKey,
+            fixedPrivateKey,
             SCOPES
         );
-    } else {
-        // Tryb lokalny
+        console.log("✅ Autoryzacja JWT utworzona pomyślnie.");
+    }
+    // 2. SPRAWDZANIE PLIKU (LOKALNIE)
+    else {
         const credentialsPath = path.join(__dirname, 'credentials.json');
         if (fs.existsSync(credentialsPath)) {
             console.log("📂 Start: Tryb Lokalny (plik znaleziony)");
             authClient = new google.auth.JWT({ keyFile: credentialsPath, scopes: SCOPES });
         } else {
-            console.error("⚠️ FATAL: Brak credentials.json i brak zmiennej ENV!");
+            console.error("⚠️ OSTRZEŻENIE: Brak credentials.json i brak zmiennej ENV.");
         }
     }
 } catch (error) {
@@ -67,10 +70,7 @@ app.get('/:token', async (req, res) => {
     if (token === 'favicon.ico') return res.status(204).end();
 
     try {
-        // Test czy authClient w ogóle istnieje
-        if (!authClient) {
-            throw new Error("Klient Auth nie został utworzony (błąd konfiguracji).");
-        }
+        if (!authClient) throw new Error("Serwer nie jest zalogowany do Google.");
 
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: process.env.SHEET_ID,
@@ -93,9 +93,8 @@ app.get('/:token', async (req, res) => {
             res.status(404).render('404');
         }
     } catch (error) {
-        console.error("🔥 Błąd GET:", error.message);
-        // Jeśli błąd to "unregistered callers", to znaczy że API Sheets nie jest włączone w Cloud Console
-        res.status(500).send(`Błąd połączenia z Google: ${error.message}`);
+        console.error("🔥 BŁĄD GOOGLE API:", error.message);
+        res.status(500).send(`Błąd połączenia: ${error.message}`);
     }
 });
 
@@ -104,6 +103,8 @@ app.post('/confirm/:token', async (req, res) => {
     const { status, comment } = req.body;
 
     try {
+        if (!authClient) throw new Error("Błąd autoryzacji serwera.");
+
         const getRows = await sheets.spreadsheets.values.get({
             spreadsheetId: process.env.SHEET_ID,
             range: 'Arkusz1!A:A',
